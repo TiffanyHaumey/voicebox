@@ -1,0 +1,19 @@
+{
+  "planPath": "docs/superpowers/plans/2026-06-05-voicebox-implementation.md",
+  "tasks": [
+    {"id": 0, "subject": "Task 0: Project scaffold & tooling", "status": "pending"},
+    {"id": 1, "subject": "Task 1: Stateless effects", "status": "pending", "blockedBy": [0]},
+    {"id": 2, "subject": "Task 2: EQ / filter effect", "status": "pending", "blockedBy": [1]},
+    {"id": 3, "subject": "Task 3: Delay and Reverb", "status": "pending", "blockedBy": [2]},
+    {"id": 4, "subject": "Task 4: Pitch shift and formant shift", "status": "pending", "blockedBy": [3]},
+    {"id": 5, "subject": "Task 5: Effect chain + registry", "status": "pending", "blockedBy": [4]},
+    {"id": 6, "subject": "Task 6: Preset loading & validation", "status": "pending", "blockedBy": [0]},
+    {"id": 7, "subject": "Task 7: Thread-safe params", "status": "pending", "blockedBy": [0]},
+    {"id": 8, "subject": "Task 8: The 11 voice presets", "status": "pending", "blockedBy": [5, 6]},
+    {"id": 9, "subject": "Task 9: Audio I/O engine", "status": "pending", "blockedBy": [5, 7, 8]},
+    {"id": 10, "subject": "Task 10: PyQt GUI", "status": "pending", "blockedBy": [9]},
+    {"id": 11, "subject": "Task 11: Entry point & wiring", "status": "pending", "blockedBy": [10]},
+    {"id": 12, "subject": "Task 12: Docs for virtual-device setup", "status": "pending", "blockedBy": [0]}
+  ],
+  "lastUpdated": "2026-06-05"
+}
