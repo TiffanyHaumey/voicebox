@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.spec
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Audio scratch / recordings
+*.wav
+*.aiff
+!tests/fixtures/*.wav
