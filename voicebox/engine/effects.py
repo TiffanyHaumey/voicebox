@@ -1,4 +1,5 @@
 import numpy as np
+from scipy import signal
 from voicebox.constants import SAMPLE_RATE
 
 class Effect:
@@ -39,3 +40,20 @@ class Distortion(Effect):
         self.drive = float(drive)
     def process(self, block):
         return np.tanh(block * self.drive)
+
+class Filter(Effect):
+    def __init__(self, kind="lowpass", cutoff=1000.0, bandwidth=500.0, order=4):
+        nyq = SAMPLE_RATE / 2
+        if kind == "bandpass":
+            lo = max(20.0, cutoff - bandwidth / 2) / nyq
+            hi = min(nyq - 1, cutoff + bandwidth / 2) / nyq
+            self.sos = signal.butter(order, [lo, hi], btype="bandpass", output="sos")
+        else:
+            self.sos = signal.butter(order, cutoff / nyq, btype=kind, output="sos")
+        # zero initial state, shaped (n_sections, 2) for a 1-D (mono) signal
+        self.zi = np.zeros_like(signal.sosfilt_zi(self.sos))
+    def process(self, block):
+        out, self.zi = signal.sosfilt(self.sos, block, zi=self.zi)
+        return out
+    def reset(self):
+        self.zi = np.zeros_like(signal.sosfilt_zi(self.sos))

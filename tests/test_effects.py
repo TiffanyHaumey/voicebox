@@ -32,3 +32,17 @@ def test_effects_preserve_shape_and_dtype():
         out = fx(_sine())
         assert out.shape == (512,)
         assert out.dtype == np.float32
+
+def test_lowpass_attenuates_high_freq():
+    from voicebox.engine.effects import Filter
+    high = _sine(freq=8000, n=4096)
+    lp = Filter(kind="lowpass", cutoff=1000)
+    out = np.concatenate([lp(high[i:i+512]) for i in range(0, 4096, 512)])
+    assert np.sqrt(np.mean(out[1024:]**2)) < np.sqrt(np.mean(high[1024:]**2)) * 0.4
+
+def test_bandpass_passes_center():
+    from voicebox.engine.effects import Filter
+    mid = _sine(freq=1500, n=4096)
+    bp = Filter(kind="bandpass", cutoff=1500, bandwidth=1000)
+    out = np.concatenate([bp(mid[i:i+512]) for i in range(0, 4096, 512)])
+    assert np.sqrt(np.mean(out[2048:]**2)) > 0.1
