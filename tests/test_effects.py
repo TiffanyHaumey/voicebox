@@ -67,3 +67,36 @@ def test_reverb_adds_tail_and_keeps_range():
     tail = np.concatenate(out[1:])  # everything after the impulse block
     assert np.max(np.abs(tail)) > 0.0           # a tail exists
     assert np.max(np.abs(np.concatenate(out))) <= 1.0 + 1e-3  # never clips out of range
+
+def test_pitch_shift_up_raises_pitch():
+    from voicebox.engine.effects import PitchShift
+    sr = 48000
+    ps = PitchShift(semitones=12)  # one octave up
+    sig = _sine(freq=220, n=512*60)
+    out = np.concatenate([ps(sig[i:i+512]) for i in range(0, len(sig), 512)])
+    out = out[len(out)//2:]  # drop the first half as warm-up
+    spec = np.abs(np.fft.rfft(out * np.hanning(len(out))))
+    freqs = np.fft.rfftfreq(len(out), 1/sr)
+    dom = freqs[np.argmax(spec)]
+    assert 380 < dom < 500
+
+def test_pitch_shift_preserves_block_size():
+    from voicebox.engine.effects import PitchShift
+    ps = PitchShift(semitones=-5)
+    out = ps(_sine())
+    assert out.shape == (512,)
+    assert out.dtype == np.float32
+
+def test_formant_shift_preserves_block_size():
+    from voicebox.engine.effects import FormantShift
+    fs = FormantShift(factor=1.3)
+    out = fs(_sine())
+    assert out.shape == (512,)
+    assert out.dtype == np.float32
+
+def test_formant_shift_changes_signal():
+    from voicebox.engine.effects import FormantShift
+    fs = FormantShift(factor=1.5)
+    inp = _sine(freq=300)
+    out = fs(inp)
+    assert not np.allclose(out, inp)
