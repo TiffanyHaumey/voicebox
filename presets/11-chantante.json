@@ -1,0 +1,7 @@
+{
+  "name": "Chantante",
+  "chain": [
+    {"effect": "formant_shift", "factor": 1.15},
+    {"effect": "reverb", "room": 0.6, "wet": 0.35}
+  ]
+}

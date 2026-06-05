@@ -25,3 +25,11 @@ def test_load_all_skips_invalid(tmp_path):
     loaded = presets.load_all_presets(str(tmp_path))
     names = [p["name"] for p in loaded]
     assert "OK" in names and len(loaded) == 1
+
+def test_all_shipped_presets_build_a_chain():
+    from voicebox.engine import presets, chain
+    loaded = presets.load_all_presets(presets.presets_dir())
+    assert len(loaded) == 11
+    for p in loaded:
+        c = chain.build_chain(p["chain"])  # must not raise
+        assert c is not None

@@ -1,0 +1,8 @@
+{
+  "name": "Alien",
+  "chain": [
+    {"effect": "ring_mod", "freq": 250},
+    {"effect": "pitch_shift", "semitones": 3},
+    {"effect": "delay", "delay_ms": 60, "feedback": 0.4, "wet": 0.4, "dry": 1.0}
+  ]
+}

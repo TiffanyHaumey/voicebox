@@ -1,0 +1,8 @@
+{
+  "name": "Narrateur",
+  "chain": [
+    {"effect": "pitch_shift", "semitones": -3},
+    {"effect": "filter", "kind": "lowpass", "cutoff": 6000},
+    {"effect": "reverb", "room": 0.5, "wet": 0.2}
+  ]
+}

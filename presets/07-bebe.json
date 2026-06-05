@@ -1,0 +1,7 @@
+{
+  "name": "Bébé",
+  "chain": [
+    {"effect": "pitch_shift", "semitones": 5},
+    {"effect": "formant_shift", "factor": 1.4}
+  ]
+}

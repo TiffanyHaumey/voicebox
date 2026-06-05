@@ -1,0 +1,6 @@
+{
+  "name": "Aiguë",
+  "chain": [
+    {"effect": "pitch_shift", "semitones": 7}
+  ]
+}

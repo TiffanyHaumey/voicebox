@@ -1,0 +1,6 @@
+{
+  "name": "Femme/Homme",
+  "chain": [
+    {"effect": "formant_shift", "factor": 0.7}
+  ]
+}

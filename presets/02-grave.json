@@ -1,0 +1,7 @@
+{
+  "name": "Grave",
+  "chain": [
+    {"effect": "pitch_shift", "semitones": -6},
+    {"effect": "filter", "kind": "lowpass", "cutoff": 3000}
+  ]
+}

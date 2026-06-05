@@ -1,0 +1,7 @@
+{
+  "name": "Grotte",
+  "chain": [
+    {"effect": "reverb", "room": 0.9, "wet": 0.6},
+    {"effect": "delay", "delay_ms": 180, "feedback": 0.45, "wet": 0.4, "dry": 1.0}
+  ]
+}

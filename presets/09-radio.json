@@ -1,0 +1,7 @@
+{
+  "name": "Radio",
+  "chain": [
+    {"effect": "filter", "kind": "bandpass", "cutoff": 1800, "bandwidth": 1600},
+    {"effect": "bitcrush", "bits": 8}
+  ]
+}
