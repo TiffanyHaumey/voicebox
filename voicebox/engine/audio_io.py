@@ -91,6 +91,13 @@ class DualStreamEngine:
 
     def _out_cb(self, outdata, frames, time, status):
         block = self._buf.popleft() if self._buf else np.zeros(frames, np.float32)
+        # guard against frames != buffered block size (device start/teardown):
+        # pad with zeros or truncate so the assignment never raises in the RT thread
+        if len(block) != frames:
+            fitted = np.zeros(frames, np.float32)
+            n = min(len(block), frames)
+            fitted[:n] = block[:n]
+            block = fitted
         outdata[:] = block.reshape(-1, 1)
 
     def start(self, input_device, output_device, out_channels=1):
