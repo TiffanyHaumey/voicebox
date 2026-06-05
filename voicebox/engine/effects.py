@@ -82,7 +82,7 @@ class Delay(Effect):
 class Reverb(Effect):
     """Lightweight Schroeder: parallel wet-only combs + series allpass, then dry/wet mix."""
     def __init__(self, room=0.5, wet=0.3):
-        comb_ms = [11.0, 13.7, 15.2, 16.2]
+        comb_ms = [29.7, 37.1, 41.1, 43.7]
         # dry=0.0 so each comb contributes ONLY its echo tail (no dry pass-through);
         # the dry signal is added back exactly once in process(). Avoids dry double-dip.
         self.combs = [Delay(ms, feedback=0.6 + 0.3 * room, wet=1.0, dry=0.0) for ms in comb_ms]

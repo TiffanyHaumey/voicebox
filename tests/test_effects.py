@@ -59,7 +59,11 @@ def test_reverb_adds_tail_and_keeps_range():
     from voicebox.engine.effects import Reverb
     r = Reverb(room=0.7, wet=0.4)
     impulse = np.zeros(512, np.float32); impulse[0] = 1.0
-    _ = r(impulse)
-    tail = r(np.zeros(512, np.float32))
-    assert np.max(np.abs(tail)) > 0.0
-    assert np.max(np.abs(tail)) <= 1.0 + 1e-3
+    out = [r(impulse)]
+    # feed silence for several blocks; realistic comb delays (~30-44ms) put the
+    # reverb tail a few blocks after the impulse, so observe a wide window
+    for _ in range(9):
+        out.append(r(np.zeros(512, np.float32)))
+    tail = np.concatenate(out[1:])  # everything after the impulse block
+    assert np.max(np.abs(tail)) > 0.0           # a tail exists
+    assert np.max(np.abs(np.concatenate(out))) <= 1.0 + 1e-3  # never clips out of range
