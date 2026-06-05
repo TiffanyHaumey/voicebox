@@ -207,7 +207,13 @@ class MainWindow(QMainWindow):
         self._gain_label.setText(f"{value:+d} dB")
 
     def _on_monitoring_toggled(self, checked: bool):
-        self._params.monitoring = checked
+        # Prefer the engine's real monitor stream (routes to the default output /
+        # headphones). Fall back to the plain flag if the engine lacks it.
+        set_monitoring = getattr(self._engine, "set_monitoring", None)
+        if callable(set_monitoring):
+            set_monitoring(checked)
+        else:
+            self._params.monitoring = checked
 
     def _on_start_stop(self, checked: bool):
         if checked:
