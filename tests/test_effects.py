@@ -46,3 +46,20 @@ def test_bandpass_passes_center():
     bp = Filter(kind="bandpass", cutoff=1500, bandwidth=1000)
     out = np.concatenate([bp(mid[i:i+512]) for i in range(0, 4096, 512)])
     assert np.sqrt(np.mean(out[2048:]**2)) > 0.1
+
+def test_delay_produces_echo_tail():
+    from voicebox.engine.effects import Delay
+    d = Delay(delay_ms=10, feedback=0.5, wet=0.8)
+    impulse = np.zeros(512, np.float32); impulse[0] = 1.0
+    first = d(impulse)
+    later = d(np.zeros(512, np.float32))
+    assert np.max(np.abs(later)) > 0.05
+
+def test_reverb_adds_tail_and_keeps_range():
+    from voicebox.engine.effects import Reverb
+    r = Reverb(room=0.7, wet=0.4)
+    impulse = np.zeros(512, np.float32); impulse[0] = 1.0
+    _ = r(impulse)
+    tail = r(np.zeros(512, np.float32))
+    assert np.max(np.abs(tail)) > 0.0
+    assert np.max(np.abs(tail)) <= 1.0 + 1e-3

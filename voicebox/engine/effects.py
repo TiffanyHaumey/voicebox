@@ -57,3 +57,46 @@ class Filter(Effect):
         return out
     def reset(self):
         self.zi = np.zeros_like(signal.sosfilt_zi(self.sos))
+
+class Delay(Effect):
+    # dry=1.0 -> standard echo (dry + wet); dry=0.0 -> wet-only line (used by Reverb combs)
+    def __init__(self, delay_ms=200.0, feedback=0.4, wet=0.5, dry=1.0):
+        self.n = max(1, int(SAMPLE_RATE * delay_ms / 1000))
+        self.buf = np.zeros(self.n, np.float32)
+        self.idx = 0
+        self.fb = float(feedback)
+        self.wet = float(wet)
+        self.dry = float(dry)
+    def process(self, block):
+        out = np.empty_like(block)
+        for i, x in enumerate(block):
+            d = self.buf[self.idx]
+            y = self.dry * x + self.wet * d
+            self.buf[self.idx] = x + d * self.fb
+            self.idx = (self.idx + 1) % self.n
+            out[i] = y
+        return out
+    def reset(self):
+        self.buf[:] = 0.0; self.idx = 0
+
+class Reverb(Effect):
+    """Lightweight Schroeder: parallel wet-only combs + series allpass, then dry/wet mix."""
+    def __init__(self, room=0.5, wet=0.3):
+        comb_ms = [11.0, 13.7, 15.2, 16.2]
+        # dry=0.0 so each comb contributes ONLY its echo tail (no dry pass-through);
+        # the dry signal is added back exactly once in process(). Avoids dry double-dip.
+        self.combs = [Delay(ms, feedback=0.6 + 0.3 * room, wet=1.0, dry=0.0) for ms in comb_ms]
+        self.ap = [Delay(ms, feedback=0.5, wet=1.0, dry=0.0) for ms in (5.0, 1.7)]
+        self.wet = float(wet)
+    def process(self, block):
+        acc = np.zeros_like(block)
+        for c in self.combs:
+            acc += c(block)
+        acc /= len(self.combs)
+        for a in self.ap:
+            acc = a(acc)
+        out = (1 - self.wet) * block + self.wet * acc
+        return np.clip(out, -1.0, 1.0)
+    def reset(self):
+        for d in self.combs + self.ap:
+            d.reset()
