@@ -1,7 +1,10 @@
 {
   "name": "Radio",
   "chain": [
-    {"effect": "filter", "kind": "bandpass", "cutoff": 1800, "bandwidth": 1600},
-    {"effect": "bitcrush", "bits": 8}
+    {"effect": "filter", "kind": "bandpass", "cutoff": 1900, "bandwidth": 2200},
+    {"effect": "gain", "gain_db": 12},
+    {"effect": "distortion", "drive": 1.6},
+    {"effect": "bitcrush", "bits": 10},
+    {"effect": "limiter", "threshold": 0.95}
   ]
 }

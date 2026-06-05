@@ -1,8 +1,9 @@
 {
   "name": "Robot",
   "chain": [
-    {"effect": "ring_mod", "freq": 100},
-    {"effect": "bitcrush", "bits": 6},
-    {"effect": "filter", "kind": "lowpass", "cutoff": 4000}
+    {"effect": "ring_mod", "freq": 80},
+    {"effect": "bitcrush", "bits": 8},
+    {"effect": "filter", "kind": "lowpass", "cutoff": 5000},
+    {"effect": "limiter", "threshold": 0.95}
   ]
 }

@@ -1,6 +1,7 @@
 {
   "name": "Aiguë",
   "chain": [
-    {"effect": "pitch_shift", "semitones": 7}
+    {"effect": "pitch_shift", "semitones": 6, "preserve_formants": true},
+    {"effect": "limiter", "threshold": 0.95}
   ]
 }

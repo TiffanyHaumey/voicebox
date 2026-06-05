@@ -1,6 +1,5 @@
 import numpy as np
 from scipy import signal
-from scipy.signal import resample as scipy_resample
 from voicebox.constants import SAMPLE_RATE
 
 class Effect:
@@ -41,6 +40,38 @@ class Distortion(Effect):
         self.drive = float(drive)
     def process(self, block):
         return np.tanh(block * self.drive)
+
+class Limiter(Effect):
+    """Smooth peak limiter with a soft knee and per-sample release.
+
+    A hard ``np.clip`` flattens peaks into square-ish edges that buzz. This
+    tracks a running gain-reduction envelope: when a sample would exceed
+    ``threshold`` the target gain drops instantly (fast attack), then recovers
+    gradually (``release`` per sample). The whole block is scaled by the smoothed
+    gain, so transients are tamed without the gritty edge of hard clipping. A
+    final tanh catches any residual overshoot."""
+    def __init__(self, threshold: float = 0.9, release: float = 0.9995):
+        self.threshold = float(threshold)
+        self.release = float(release)
+        self._gain = 1.0
+    def reset(self):
+        self._gain = 1.0
+    def process(self, block):
+        out = np.empty_like(block)
+        thr = self.threshold
+        g = self._gain
+        rel = self.release
+        for i, x in enumerate(block):
+            peak = abs(x) * g
+            if peak > thr:
+                g = thr / (abs(x) + 1e-9)          # instant attack
+            else:
+                g = g * rel + (1.0 - rel)          # ease back toward unity
+                if g > 1.0:
+                    g = 1.0
+            out[i] = x * g
+        self._gain = g
+        return np.tanh(out * 1.05) / np.tanh(1.05)
 
 class Filter(Effect):
     def __init__(self, kind="lowpass", cutoff=1000.0, bandwidth=500.0, order=4):
@@ -104,131 +135,193 @@ class Reverb(Effect):
 
 
 class PitchShift(Effect):
-    """Pitch shift without changing duration via windowed-OLA + resampling.
+    """Streaming phase vocoder pitch shift (constant duration).
 
-    Algorithm:
-    - Accumulate input in a queue; every hop_a input samples, extract a
-      win_size-sample Hann-windowed frame from the queue.
-    - Resample each frame from win_size to target_len = win_size/alpha samples
-      using scipy.signal.resample (squeezes the frame in time, raising pitch).
-    - Overlap-add the resampled frame into an output OLA buffer at pitch-rate
-      hops (hop_out = hop_a/alpha), then advance the output pointer by hop_out.
-    - Per call, read hop_a samples from the output buffer (zeros during warm-up).
-    - Net result: same block-rate output, pitch shifted by semitones.
+    This is the Bernsee ``smbPitchShift`` algorithm (public domain), adapted to
+    block-by-block streaming. Unlike a plain resample-and-overlap-add, it tracks
+    the *true* instantaneous frequency of each FFT bin from the phase difference
+    between successive analysis frames, shifts those bins by the pitch ratio, and
+    re-synthesises with a continuously accumulated phase. Tracking true phase is
+    what removes the metallic / "phasy" artefacts the naive method produces.
+
+    Per analysis frame (hop H, window N, 4x overlap):
+      - Hann-window the frame, rFFT -> magnitude + phase.
+      - dphi = phase - last_phase, minus the expected advance (2*pi*k*H/N),
+        wrapped to [-pi, pi] -> the bin's true frequency deviation in bins.
+      - Shift: bin k moves to round(k * ratio), accumulating magnitude and
+        carrying the (scaled) true frequency to the destination bin.
+      - Synthesis: advance a persistent per-bin phase by the destination true
+        frequency, rebuild the spectrum, irFFT, Hann-window again, overlap-add.
+    The synthesis window^2 sum is accumulated and divided out for COLA-correct
+    reconstruction. Duration is preserved (analysis hop == synthesis hop).
     """
 
-    def __init__(self, semitones: float = 0.0, win_size: int = 1024, hop_a: int = 256):
+    def __init__(self, semitones: float = 0.0, win_size: int = 1024, hop_a: int = 256,
+                 preserve_formants: bool = False):
         self.semitones = float(semitones)
         self.win_size = int(win_size)
         self.hop_a = int(hop_a)
-        # alpha > 1 pitches up; target_len < win_size = squeezes = higher pitch
-        self.alpha = 2.0 ** (self.semitones / 12.0)
-        self.target_len = max(1, int(round(self.win_size / self.alpha)))
-        # Output hop: how far to advance synthesis position per input hop_a
-        self.hop_out = max(1, int(round(self.hop_a / self.alpha)))
+        self.preserve_formants = bool(preserve_formants)
+        self.ratio = 2.0 ** (self.semitones / 12.0)
+        self._n_bins = self.win_size // 2 + 1
+        # Expected phase advance per bin over one hop, and bins->Hz scale.
+        k = np.arange(self._n_bins, dtype=np.float64)
+        self._omega = 2.0 * np.pi * self.hop_a * k / self.win_size
+        self._win = np.hanning(self.win_size).astype(np.float64)
+        # Synthesis trim margin: latency from window length.
         self._setup_buffers()
 
     def _setup_buffers(self):
-        self._win = np.hanning(self.win_size).astype(np.float64)
-        # Input queue as a numpy deque implemented with a list
         self._in_buf = np.zeros(0, np.float64)
-        # OLA output buffer: needs to be large enough to hold several frames ahead
-        ola_size = self.win_size + self.hop_out * 64
-        self._ola_buf = np.zeros(ola_size, np.float64)
-        self._ola_norm = np.zeros(ola_size, np.float64)
-        # Absolute positions for OLA write head and read head
-        self._ola_write_pos = 0  # next output synthesis frame goes here (circular)
-        self._out_read_pos = 0   # next sample to emit (circular)
-        self._out_produced = 0   # total samples produced (absolute)
-        self._out_consumed = 0   # total samples emitted (absolute)
-        # Frame counter (how many input hops processed)
-        self._frame_idx = 0
+        self._last_phase = np.zeros(self._n_bins, np.float64)
+        self._sum_phase = np.zeros(self._n_bins, np.float64)
+        # Linear output accumulators with an absolute base index.
+        self._out_acc = np.zeros(0, np.float64)
+        self._out_norm = np.zeros(0, np.float64)
+        self._buf_base = 0     # absolute sample index of _out_acc[0]
+        self._write_pos = 0    # absolute index where the next frame is written
+        self._emit_pos = 0     # absolute index of the next sample to emit
 
     def reset(self):
         self._setup_buffers()
 
-    def _process_frames(self):
-        """Process all available frames from the input buffer."""
-        ola_size = len(self._ola_buf)
-        while len(self._in_buf) >= self.win_size:
-            frame = self._in_buf[:self.win_size] * self._win
-            self._in_buf = self._in_buf[self.hop_a:]
+    def _ensure_capacity(self, abs_end):
+        need = abs_end - self._buf_base
+        if need > len(self._out_acc):
+            grow = need - len(self._out_acc)
+            self._out_acc = np.concatenate([self._out_acc, np.zeros(grow, np.float64)])
+            self._out_norm = np.concatenate([self._out_norm, np.zeros(grow, np.float64)])
 
-            # Resample to target_len (pitch shift)
-            resampled = scipy_resample(frame, self.target_len)
+    def _process_frame(self):
+        N, H = self.win_size, self.hop_a
+        frame = self._in_buf[:N] * self._win
+        self._in_buf = self._in_buf[H:]
 
-            # Overlap-add into output buffer at current write position
-            base = self._ola_write_pos % ola_size
-            end = base + self.target_len
-            if end <= ola_size:
-                self._ola_buf[base:end] += resampled
-                self._ola_norm[base:end] += 1.0
-            else:
-                split = ola_size - base
-                self._ola_buf[base:] += resampled[:split]
-                self._ola_buf[:end - ola_size] += resampled[split:]
-                self._ola_norm[base:] += 1.0
-                self._ola_norm[:end - ola_size] += 1.0
+        spec = np.fft.rfft(frame)
+        mag = np.abs(spec)
+        phase = np.angle(spec)
 
-            self._ola_write_pos += self.hop_out
-            self._out_produced += self.hop_out
-            self._frame_idx += 1
+        # True per-bin frequency (in bins) from phase difference.
+        dphi = phase - self._last_phase
+        self._last_phase = phase
+        dphi -= self._omega
+        dphi = np.mod(dphi + np.pi, 2.0 * np.pi) - np.pi
+        true_freq = np.arange(self._n_bins) + dphi * self.win_size / (2.0 * np.pi * H)
+
+        if self.preserve_formants:
+            # Keep the original spectral envelope: shift only the fine structure
+            # by warping the magnitude back down so formants stay put.
+            mag = self._whiten(mag)
+
+        # Shift bins by the pitch ratio.
+        k = np.arange(self._n_bins)
+        target = np.round(k * self.ratio).astype(np.int64)
+        valid = target < self._n_bins
+        syn_mag = np.zeros(self._n_bins, np.float64)
+        syn_freq = np.zeros(self._n_bins, np.float64)
+        np.add.at(syn_mag, target[valid], mag[valid])
+        syn_freq[target[valid]] = true_freq[valid] * self.ratio
+
+        if self.preserve_formants:
+            syn_mag = self._reapply_envelope(syn_mag, np.abs(spec))
+
+        # Accumulate synthesis phase from the shifted true frequencies.
+        self._sum_phase += 2.0 * np.pi * H * syn_freq / self.win_size
+        out_spec = syn_mag * np.exp(1j * self._sum_phase)
+        out_frame = np.fft.irfft(out_spec, n=N) * self._win
+
+        self._ensure_capacity(self._write_pos + N)
+        s = self._write_pos - self._buf_base
+        self._out_acc[s:s + N] += out_frame
+        self._out_norm[s:s + N] += self._win ** 2
+        self._write_pos += H
+
+    def _whiten(self, mag):
+        env = self._envelope(mag)
+        return mag / env
+
+    def _reapply_envelope(self, mag, orig_mag):
+        return mag * self._envelope(orig_mag)
+
+    def _envelope(self, mag, lifter=24):
+        # Cepstral smoothing: low-quefrency liftering of log-magnitude.
+        log_mag = np.log(mag + 1e-9)
+        full = np.concatenate([log_mag, log_mag[-2:0:-1]])
+        ceps = np.fft.rfft(full)
+        ceps[lifter:] = 0.0
+        smooth = np.fft.irfft(ceps, n=len(full))[:self._n_bins]
+        return np.exp(smooth) + 1e-9
 
     def process(self, block: np.ndarray) -> np.ndarray:
         n = len(block)
-        # Append input block to input buffer
         self._in_buf = np.concatenate([self._in_buf, block.astype(np.float64)])
-        self._process_frames()
+        while len(self._in_buf) >= self.win_size:
+            self._process_frame()
 
-        # Emit n samples from OLA output buffer
         out = np.zeros(n, np.float32)
-        ola_size = len(self._ola_buf)
-        available = self._out_produced - self._out_consumed
-        emit = min(n, available)
-        for i in range(emit):
-            pos = (self._out_read_pos + i) % ola_size
-            norm = self._ola_norm[pos]
-            val = self._ola_buf[pos] / norm if norm > 1e-8 else 0.0
-            out[i] = float(np.clip(val, -1.0, 1.0))
-            # Clear consumed sample
-            self._ola_buf[pos] = 0.0
-            self._ola_norm[pos] = 0.0
-        self._out_read_pos = (self._out_read_pos + emit) % ola_size
-        self._out_consumed += emit
-        # Remaining out samples stay zero (warm-up)
+        # Only emit positions already covered by the full overlap (one window
+        # behind the write head), so every sample has its complete COLA sum.
+        ready = self._write_pos - self.win_size
+        avail = ready - self._emit_pos
+        emit = max(0, min(n, avail))
+        if emit > 0:
+            s = self._emit_pos - self._buf_base
+            seg = self._out_acc[s:s + emit]
+            nrm = self._out_norm[s:s + emit]
+            vals = np.divide(seg, nrm, out=np.zeros_like(seg), where=nrm > 1e-8)
+            out[:emit] = np.clip(vals, -1.0, 1.0).astype(np.float32)
+            self._emit_pos += emit
+            # Trim finalised samples from the front to bound memory.
+            trim = self._emit_pos - self._buf_base
+            if trim > self.win_size * 4:
+                self._out_acc = self._out_acc[trim:]
+                self._out_norm = self._out_norm[trim:]
+                self._buf_base = self._emit_pos
         return out
 
 
 class FormantShift(Effect):
-    """Warp the spectral envelope per block via FFT magnitude interpolation.
+    """Shift formants while leaving pitch (harmonic structure) intact.
 
-    Per-block algorithm:
-    - rfft the block
-    - Compute magnitude and phase
-    - Warp magnitude bins: bin k gets its energy from bin k/factor (interpolated)
-      so factor>1 stretches spectrum upward (brighter/smaller), factor<1 compresses
-    - Recombine warped magnitude with original phase
-    - irfft back to time domain, return float32
+    Naively warping the whole magnitude spectrum also drags the harmonics, which
+    changes pitch and rings. Instead this separates the signal into:
+      - spectral envelope (the formants / vocal-tract shape), via cepstral
+        liftering — keep only the low-quefrency part of the log-magnitude;
+      - fine structure (the harmonics / source) = magnitude / envelope.
+    Only the envelope is frequency-warped by ``factor`` (factor>1 = brighter /
+    "smaller head", factor<1 = darker / "bigger head"), then multiplied back onto
+    the untouched fine structure. Original phase is preserved.
     """
 
-    def __init__(self, factor: float = 1.0):
+    def __init__(self, factor: float = 1.0, lifter: int = 24):
         self.factor = float(factor)
+        self.lifter = int(lifter)
 
     def reset(self):
         pass  # stateless per-block effect
+
+    def _envelope(self, mag, n_bins):
+        log_mag = np.log(mag + 1e-9)
+        full = np.concatenate([log_mag, log_mag[-2:0:-1]])
+        ceps = np.fft.rfft(full)
+        ceps[self.lifter:] = 0.0
+        smooth = np.fft.irfft(ceps, n=len(full))[:n_bins]
+        return np.exp(smooth)
 
     def process(self, block: np.ndarray) -> np.ndarray:
         n = len(block)
         spec = np.fft.rfft(block.astype(np.float64))
         mag = np.abs(spec)
         phase = np.angle(spec)
-
         n_bins = len(mag)
-        src_bins = np.arange(n_bins, dtype=np.float64) / self.factor
-        # Clamp to valid range for interpolation
-        src_bins = np.clip(src_bins, 0.0, n_bins - 1)
-        warped_mag = np.interp(src_bins, np.arange(n_bins), mag)
 
-        warped_spec = warped_mag * np.exp(1j * phase)
-        out = np.fft.irfft(warped_spec, n=n)
+        env = self._envelope(mag, n_bins)
+        fine = mag / (env + 1e-9)  # harmonic structure, formant-flat
+
+        # Warp ONLY the envelope: new bin k samples the old envelope at k/factor.
+        src = np.clip(np.arange(n_bins, dtype=np.float64) / self.factor, 0.0, n_bins - 1)
+        warped_env = np.interp(src, np.arange(n_bins), env)
+
+        new_mag = fine * warped_env
+        out = np.fft.irfft(new_mag * np.exp(1j * phase), n=n)
         return out.astype(np.float32)

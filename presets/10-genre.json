@@ -1,6 +1,8 @@
 {
   "name": "Femme/Homme",
   "chain": [
-    {"effect": "formant_shift", "factor": 0.7}
+    {"effect": "pitch_shift", "semitones": -4, "preserve_formants": true},
+    {"effect": "formant_shift", "factor": 0.8},
+    {"effect": "limiter", "threshold": 0.95}
   ]
 }

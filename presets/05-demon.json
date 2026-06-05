@@ -1,8 +1,9 @@
 {
   "name": "Démon",
   "chain": [
-    {"effect": "pitch_shift", "semitones": -9},
-    {"effect": "distortion", "drive": 4.0},
-    {"effect": "reverb", "room": 0.7, "wet": 0.35}
+    {"effect": "pitch_shift", "semitones": -8, "preserve_formants": true},
+    {"effect": "distortion", "drive": 2.2},
+    {"effect": "reverb", "room": 0.7, "wet": 0.28},
+    {"effect": "limiter", "threshold": 0.9}
   ]
 }

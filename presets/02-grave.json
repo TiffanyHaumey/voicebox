@@ -1,7 +1,8 @@
 {
   "name": "Grave",
   "chain": [
-    {"effect": "pitch_shift", "semitones": -6},
-    {"effect": "filter", "kind": "lowpass", "cutoff": 3000}
+    {"effect": "pitch_shift", "semitones": -5, "preserve_formants": true},
+    {"effect": "filter", "kind": "lowpass", "cutoff": 6000},
+    {"effect": "limiter", "threshold": 0.95}
   ]
 }

@@ -6,6 +6,7 @@ EFFECT_REGISTRY = {
     "ring_mod": effects.RingMod,
     "bitcrush": effects.Bitcrush,
     "distortion": effects.Distortion,
+    "limiter": effects.Limiter,
     "filter": effects.Filter,
     "eq": effects.Filter,        # alias: spec uses "eq" in some presets; same impl
     "delay": effects.Delay,
